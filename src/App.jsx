@@ -99,56 +99,45 @@ function getTopFactors(f) {
   ].sort((a,b)=>Math.abs(b.contrib)-Math.abs(a.contrib)).slice(0,5);
 }
 
-// ─── ECG Loader ───────────────────────────────────────────────────────────────
-function ECGInlineLoader({ accent, canvasId }) {
-  useEffect(() => {
-    let raf, frame = 0, data = [];
-    const speed = 4;
-    function draw() {
-      const canvas = document.getElementById(canvasId);
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      const W2 = canvas.width, H2 = canvas.height, mid = H2 / 2;
-      function ecgY(t) {
-        const c = t % 100;
-        if (c < 8)  return mid + Math.sin(c * 0.4) * 2;
-        if (c < 13) return mid - (H2 * 0.55);
-        if (c < 16) return mid + (H2 * 0.25);
-        if (c < 20) return mid - (H2 * 0.9);
-        if (c < 24) return mid + (H2 * 0.2);
-        if (c < 32) return mid - 5 * Math.sin((c - 24) * 0.4);
-        return mid + Math.sin(c * 0.06) * 1.5;
-      }
-      ctx.clearRect(0, 0, W2, H2);
-      data.push(ecgY(frame));
-      if (data.length > W2 / speed) data.shift();
-      [4, 2].forEach((lw, gi) => {
-        ctx.beginPath();
-        ctx.strokeStyle = accent + (gi === 0 ? "25" : "55");
-        ctx.lineWidth = lw;
-        data.forEach((y, i) => i === 0 ? ctx.moveTo(i * speed, y) : ctx.lineTo(i * speed, y));
-        ctx.stroke();
-      });
-      ctx.beginPath();
-      ctx.strokeStyle = accent;
-      ctx.lineWidth = 2;
-      data.forEach((y, i) => i === 0 ? ctx.moveTo(i * speed, y) : ctx.lineTo(i * speed, y));
-      ctx.stroke();
-      const lx = (data.length - 1) * speed, ly = data[data.length - 1];
-      ctx.beginPath();
-      ctx.arc(lx, ly, 3.5, 0, Math.PI * 2);
-      ctx.fillStyle = accent;
-      ctx.shadowColor = accent;
-      ctx.shadowBlur = 8;
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      frame++;
-      raf = requestAnimationFrame(draw);
-    }
-    draw();
-    return () => cancelAnimationFrame(raf);
-  }, [accent, canvasId]);
-  return null;
+
+
+// ─── Beating Heart Loader ─────────────────────────────────────────────────────
+function BeatingHeart({ color }) {
+  return (
+    <div style={{ position:"relative", display:"flex", alignItems:"center", justifyContent:"center", width:52, height:52 }}>
+      <style>{`
+        @keyframes heartbeat {
+          0%   { transform: scale(1);   }
+          14%  { transform: scale(1.32);}
+          28%  { transform: scale(1);   }
+          42%  { transform: scale(1.2); }
+          56%  { transform: scale(1);   }
+          100% { transform: scale(1);   }
+        }
+        @keyframes pulseRing {
+          0%   { transform: scale(0.75); opacity: 0.6; }
+          100% { transform: scale(2.4);  opacity: 0;   }
+        }
+        .hb-ring {
+          position: absolute; inset: 0; border-radius: 50%;
+          border: 1.5px solid ${color};
+          animation: pulseRing 1.1s ease-out infinite;
+        }
+        .hb-ring2 { animation-delay: 0.38s !important; }
+        .hb-icon  { animation: heartbeat 1.1s ease-in-out infinite; }
+      `}</style>
+      <div className="hb-ring"/>
+      <div className="hb-ring hb-ring2"/>
+      <div className="hb-icon" style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <svg width="28" height="28" viewBox="0 0 24 24"
+          fill={color} stroke={color} strokeWidth="1.5"
+          strokeLinecap="round" strokeLinejoin="round"
+          style={{ filter:`drop-shadow(0 0 7px ${color}99)` }}>
+          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+        </svg>
+      </div>
+    </div>
+  );
 }
 
 // ─── Theme Toggle ─────────────────────────────────────────────────────────────
@@ -735,137 +724,116 @@ export default function App() {
         .back-btn:hover { border-color:${t.border2}; color:${t.textSub}; }
       `}</style>
 
-      <div style={{ background:t.bg, position:"fixed", inset:0, overflowY:"auto",
-        display:"flex", flexDirection:"column", alignItems:"center",
-        justifyContent:"flex-start", padding:"28px 16px 48px",
-        transition:"background .3s" }}>
-        <div style={{ width:"100%", maxWidth:520 }}>
 
-          {/* Brand + theme toggle */}
-          {step === 0 ? (
-            <div style={{ marginBottom:24, display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", width:"100%" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:8,
-                  background:`${t.accent}10`, border:`1px solid ${t.accent}28`,
-                  borderRadius:20, padding:"5px 14px" }}>
-                  <Heart size={13} color={t.accent} strokeWidth={2.5}/>
-                  <span style={{ fontSize:11, fontWeight:700, color:t.accent, letterSpacing:"0.1em", textTransform:"uppercase" }}>
-                    CardioSense AI
-                  </span>
-                </div>
-                <ThemeToggle current={themeKey} onChange={setThemeKey} />
-              </div>
-              <h1 style={{ fontSize:"clamp(20px,4vw,28px)", fontWeight:700, letterSpacing:"-0.03em",
-                lineHeight:1.15, color:t.text, textAlign:"center" }}>
-                Heart Disease <span style={{ color:t.accent }}>Risk Assessment</span>
-              </h1>
-            </div>
-          ) : (
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-              marginBottom:20, width:"100%", padding:"10px 14px",
-              background:t.surface, border:`1px solid ${t.border}`, borderRadius:14 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <Heart size={15} color={t.accent} strokeWidth={2.5}/>
-                <span style={{ fontSize:13, fontWeight:700, color:t.accent }}>CardioSense AI</span>
-              </div>
-              <ThemeToggle current={themeKey} onChange={setThemeKey} />
-            </div>
-          )}
 
-          {/* Progress */}
-          {step > 0 && (
-            <div style={{ marginBottom:22 }}>
-              <div style={{ height:3, borderRadius:99, background:t.progressBg, marginBottom:14, overflow:"hidden" }}>
-                <div style={{ height:"100%", borderRadius:99, background:t.grad,
-                  width:`${progress}%`, transition:"width .4s cubic-bezier(.4,0,.2,1)" }}/>
-              </div>
-              <div style={{ display:"flex", justifyContent:"space-between" }}>
-                {STEPS.slice(1).map((s,i) => {
-                  const ri=i+1, done=ri<step, active=ri===step;
-                  const StepIcon = s.Icon;
-                  return (
-                    <button key={s.id} onClick={()=>ri<step&&navigate(ri)}
-                      style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4,
-                        background:"none", border:"none", cursor:ri<step?"pointer":"default",
-                        padding:"2px 4px", opacity:ri>step?0.3:1, transition:"opacity .2s" }}>
-                      <div style={{ width:32, height:32, borderRadius:"50%",
-                        border: active?`2px solid ${t.accent}`:done?`2px solid ${t.stepDone}`:`1.5px solid ${t.border}`,
-                        background: done?t.stepDone:active?t.stepActive:t.stepInactive,
-                        display:"flex", alignItems:"center", justifyContent:"center",
-                        boxShadow:active?`0 0 0 4px ${t.accent}18`:"none", transition:"all .25s" }}>
-                        {done
-                          ? <Check size={13} color="#fff" strokeWidth={3}/>
-                          : <StepIcon size={13} color={active?t.accent:t.textMute} strokeWidth={2}/>
-                        }
-                      </div>
-                      <span style={{ fontSize:9, fontWeight:active?600:400,
-                        color:active?t.accent:done?t.textMute:t.textDim,
-                        letterSpacing:"0.04em", whiteSpace:"nowrap" }}>{s.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+      <div style={{ background:t.bg, position:"fixed", inset:0, display:"flex",
+        flexDirection:"column", transition:"background .3s" }}>
 
-          {/* Form card */}
-          <div style={{ background:t.card, border:`1px solid ${t.border}`, borderRadius:20,
-            padding:"26px 22px", marginBottom:12,
-            boxShadow:t.isLight?"0 4px 28px rgba(220,38,38,.07)":"0 20px 60px rgba(0,0,0,.4)" }}>
-            <div style={{ overflow:"hidden" }}>
-              <div className={animating?(dir>0?"sof":"sob"):(dir>0?"sif":"sib")}>
-                {pages[step]}
-              </div>
-            </div>
-          </div>
-
-          {/* Step label */}
-          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:12, padding:"0 2px" }}>
-            <span style={{ fontSize:11, color:t.textDim, fontFamily:"'JetBrains Mono',monospace" }}>
-              {step===0?"Get started":`Step ${step} of ${STEPS.length-1}`}
+        {/* ── Top bar ── */}
+        <div style={{ flexShrink:0, display:"flex", alignItems:"center",
+          justifyContent:"space-between", padding:"16px 24px",
+          borderBottom:`1px solid ${t.border}` }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <Heart size={15} color={t.accent} strokeWidth={2.5}/>
+            <span style={{ fontSize:13, fontWeight:700, color:t.accent, letterSpacing:"0.08em", textTransform:"uppercase" }}>
+              CardioSense AI
             </span>
-            <span style={{ fontSize:11, color:t.textDim }}>{STEPS[step].label}</span>
           </div>
-
-          {/* Nav */}
-          <div style={{ display:"grid", gridTemplateColumns:step>0?"auto 1fr":"1fr", gap:10 }}>
-            {step>0 && (
-              <button className="back-btn" onClick={()=>navigate(step-1)}>
-                <ChevronLeft size={16} strokeWidth={2.5}/> Back
-              </button>
-            )}
-            {isLast ? (
-              <div style={{ position:"relative" }}>
-                <button className="submit-btn" onClick={handleSubmit} disabled={submitting}
-                  style={{ width:"100%", border:"none", borderRadius:12,
-                    cursor:submitting?"default":"pointer", background:t.grad, color:"#fff",
-                    fontSize:14, fontWeight:700, fontFamily:"'Sora',sans-serif",
-                    transition:"all .15s", height:52, overflow:"hidden",
-                    display:"flex", alignItems:"center", justifyContent:"center",
-                    flexDirection:"column", gap:4, padding:0 }}>
-                  {!submitting
-                    ? <span style={{display:"flex",alignItems:"center",gap:7}}>
-                        Get My Results <ArrowRight size={15} strokeWidth={2.5}/>
-                      </span>
-                    : <>
-                        <canvas id="ecg-loader-canvas" width={180} height={22}
-                          style={{ width:180, height:22, display:"block", opacity:.9 }} />
-                        <span style={{ fontSize:10, fontWeight:600, letterSpacing:"0.14em",
-                          textTransform:"uppercase", opacity:.85 }}>Analysing…</span>
-                      </>
-                  }
-                </button>
-                {submitting && <ECGInlineLoader accent="#fff" canvasId="ecg-loader-canvas" />}
-              </div>
-            ) : (
-              <button className="next-btn" onClick={()=>navigate(step+1)}>
-                {step===0?"Start Assessment":"Continue"}
-                <ChevronRight size={16} strokeWidth={2.5}/>
-              </button>
-            )}
-          </div>
-
+          {step > 0 && (
+            <span style={{ fontSize:11, color:t.textMute, fontFamily:"'JetBrains Mono',monospace" }}>
+              Step {step} / {STEPS.length - 1}
+            </span>
+          )}
+          <ThemeToggle current={themeKey} onChange={setThemeKey} />
         </div>
+
+        {/* ── Progress bar ── */}
+        {step > 0 && (
+          <div style={{ flexShrink:0, padding:"14px 24px 0" }}>
+            <div style={{ height:3, borderRadius:99, background:t.progressBg, marginBottom:14, overflow:"hidden" }}>
+              <div style={{ height:"100%", borderRadius:99, background:t.grad,
+                width:`${progress}%`, transition:"width .4s cubic-bezier(.4,0,.2,1)" }}/>
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", paddingBottom:14,
+              borderBottom:`1px solid ${t.border}` }}>
+              {STEPS.slice(1).map((s,i) => {
+                const ri=i+1, done=ri<step, active=ri===step;
+                const StepIcon = s.Icon;
+                return (
+                  <button key={s.id} onClick={()=>ri<step&&navigate(ri)}
+                    style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4,
+                      background:"none", border:"none", cursor:ri<step?"pointer":"default",
+                      padding:"2px 4px", opacity:ri>step?0.3:1, transition:"opacity .2s" }}>
+                    <div style={{ width:30, height:30, borderRadius:"50%",
+                      border: active?`2px solid ${t.accent}`:done?`2px solid ${t.stepDone}`:`1.5px solid ${t.border}`,
+                      background: done?t.stepDone:active?t.stepActive:t.stepInactive,
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                      boxShadow:active?`0 0 0 4px ${t.accent}18`:"none", transition:"all .25s" }}>
+                      {done
+                        ? <Check size={12} color="#fff" strokeWidth={3}/>
+                        : <StepIcon size={12} color={active?t.accent:t.textMute} strokeWidth={2}/>
+                      }
+                    </div>
+                    <span style={{ fontSize:9, fontWeight:active?600:400,
+                      color:active?t.accent:done?t.textMute:t.textDim,
+                      letterSpacing:"0.04em", whiteSpace:"nowrap" }}>{s.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Page content — scrollable body ── */}
+        <div style={{ flex:1, overflowY:"auto", padding:"28px 24px 0", maxWidth:600, width:"100%", margin:"0 auto", alignSelf:"stretch" }}>
+          {step === 0 && (
+            <h1 style={{ fontSize:"clamp(22px,4vw,32px)", fontWeight:700, letterSpacing:"-0.03em",
+              lineHeight:1.15, color:t.text, textAlign:"center", marginBottom:28 }}>
+              Heart Disease <span style={{ color:t.accent }}>Risk Assessment</span>
+            </h1>
+          )}
+          <div className={animating?(dir>0?"sof":"sob"):(dir>0?"sif":"sib")}>
+            {pages[step]}
+          </div>
+        </div>
+
+        {/* ── Bottom nav bar ── */}
+        <div style={{ flexShrink:0, borderTop:`1px solid ${t.border}`,
+          padding:"14px 24px", display:"grid",
+          gridTemplateColumns:step>0?"auto 1fr":"1fr", gap:10,
+          maxWidth:600, width:"100%", margin:"0 auto", alignSelf:"stretch" }}>
+          {step>0 && (
+            <button className="back-btn" onClick={()=>navigate(step-1)}>
+              <ChevronLeft size={16} strokeWidth={2.5}/> Back
+            </button>
+          )}
+          {isLast ? (
+            <button className="submit-btn" onClick={handleSubmit} disabled={submitting}
+              style={{ border:"none", borderRadius:12,
+                cursor:submitting?"default":"pointer", background:t.grad, color:"#fff",
+                fontSize:14, fontWeight:700, fontFamily:"'Sora',sans-serif",
+                transition:"all .15s", height:52, overflow:"hidden",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                flexDirection:"column", gap:4, padding:0 }}>
+              {!submitting
+                ? <span style={{display:"flex",alignItems:"center",gap:7}}>
+                    Get My Results <ArrowRight size={15} strokeWidth={2.5}/>
+                  </span>
+                : <div style={{display:"flex",alignItems:"center",gap:12}}>
+                    <BeatingHeart color="#fff"/>
+                    <span style={{ fontSize:11, fontWeight:600, letterSpacing:"0.12em",
+                      textTransform:"uppercase", opacity:.9 }}>Analysing…</span>
+                  </div>
+              }
+            </button>
+          ) : (
+            <button className="next-btn" onClick={()=>navigate(step+1)}>
+              {step===0?"Start Assessment":"Continue"}
+              <ChevronRight size={16} strokeWidth={2.5}/>
+            </button>
+          )}
+        </div>
+
       </div>
 
       {showResult && result!==null && (
