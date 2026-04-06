@@ -74,14 +74,18 @@ async function callAPI(form) {
 
   if (!res.ok) throw new Error(`API error ${res.status}`);
 
-  const data = await res.json(); // ✅ FIXED
-
-  const probability = data.probability; // ✅ correct key
-  const smoothed = smoothProb(probability, 5);
+  const data = await res.json(); 
+  const rawProbability = data.probability; 
+  console.log(rawProbability);
+  console.log(smoothProb(rawProbability, 5));
+  
+  // Calculate your smoothed probability
+  const smoothed = smoothProb(rawProbability, 5);
 
   return {
     ...data,
-    probability: smoothed // override with smoothed value
+    probability: smoothed,               // 1. Override the decimal
+    prediction: smoothed >= 0.5 ? 1 : 0  // 2. Override the 1 or 0 verdict!
   };
 }
 
@@ -487,7 +491,7 @@ function ResultCard({ result, factors, form, onClose, onRetake, t }) {
   const circ = Math.PI * 70;
   const radarData = getRadarData(form);
   const maxF = Math.max(...factors.map((f) => Math.abs(f.contrib)), 0.001);
-
+  
   return (
     <AnimatePresence>
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
