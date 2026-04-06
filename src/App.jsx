@@ -58,6 +58,12 @@ function toPayload(form) {
     Age: parseFloat(form.Age),
   };
 }
+const smoothProb = (p, T = 2) => {
+  p = Math.min(Math.max(p, 1e-7), 1 - 1e-7);
+  let logit = Math.log(p / (1 - p));
+  logit = logit / T;
+  return 1 / (1 + Math.exp(-logit));
+};
 
 async function callAPI(form) {
   const res = await fetch(API_URL, {
@@ -65,8 +71,18 @@ async function callAPI(form) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(toPayload(form)),
   });
+
   if (!res.ok) throw new Error(`API error ${res.status}`);
-  return await res.json(); // { probability, prediction }
+
+  const data = await res.json(); // ✅ FIXED
+
+  const probability = data.probability; // ✅ correct key
+  const smoothed = smoothProb(probability, 5);
+
+  return {
+    ...data,
+    probability: smoothed // override with smoothed value
+  };
 }
 
 // Perturbation-based factor attribution — flips each binary feature,
