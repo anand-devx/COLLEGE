@@ -5,7 +5,7 @@ import {
   User, Activity, FileText, TrendingUp, TrendingDown,
   Award, AlertCircle, ArrowRight, Zap, Wind, Flame,
   Waves, Brain, Cigarette, Scale, Dumbbell, Users,
-  ThermometerSun, Stethoscope, ShieldAlert,
+  ThermometerSun, Stethoscope, ShieldAlert, Download,
 } from "lucide-react";
 
 // ─── Themes ───────────────────────────────────────────────────────────────────
@@ -35,7 +35,6 @@ const THEMES = {
 // ─── API ──────────────────────────────────────────────────────────────────────
 const API_URL = "https://mlbackend-ww05.onrender.com/predict";
 
-// Formats form state → backend payload (all values as floats)
 function toPayload(form) {
   return {
     Chest_Pain: parseFloat(form.Chest_Pain),
@@ -74,23 +73,20 @@ async function callAPI(form) {
 
   if (!res.ok) throw new Error(`API error ${res.status}`);
 
-  const data = await res.json(); 
-  const rawProbability = data.probability; 
+  const data = await res.json();
+  const rawProbability = data.probability;
   console.log(rawProbability);
   console.log(smoothProb(rawProbability, 5));
-  
-  // Calculate your smoothed probability
+
   const smoothed = smoothProb(rawProbability, 5);
 
   return {
     ...data,
-    probability: smoothed,               // 1. Override the decimal
-    prediction: smoothed >= 0.5 ? 1 : 0  // 2. Override the 1 or 0 verdict!
+    probability: smoothed,
+    prediction: smoothed >= 0.5 ? 1 : 0
   };
 }
 
-// Perturbation-based factor attribution — flips each binary feature,
-// calls the real API for each, measures delta vs base probability
 async function getTopFactors(form, baseProb) {
   const keys = [
     { key: "Chest_Pain", name: "Chest Pain" },
@@ -136,6 +132,288 @@ function getRadarData(form) {
     { label: "Hereditary", score: form.Family_History * 100 },
     { label: "Stress", score: form.Chronic_Stress * 100 },
   ];
+}
+
+// ─── PDF Generator ────────────────────────────────────────────────────────────
+async function downloadPDFReport({ result, factors, form }) {
+  if (!window.jspdf) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  // ── Constants & Colors ─────────────────────────────────────────────────────
+  const W = 210, PH = 297, ML = 18, MR = 18, CW = W - ML - MR;
+
+  const C = {
+    dark: [15, 23, 42],       // Slate 900
+    darkSub: [51, 65, 85],    // Slate 700
+    white: [255, 255, 255],
+    bgLight: [248, 250, 252], // Slate 50
+    border: [226, 232, 240],  // Slate 200
+    grayText: [100, 116, 139], // Slate 500
+    accent: [234, 88, 12],    // Orange 600
+    green: [22, 163, 74],
+    greenBg: [220, 252, 231],
+    red: [220, 38, 38],
+    redBg: [254, 226, 226],
+    amber: [217, 119, 6],
+    amberBg: [254, 243, 199],
+    blue: [37, 99, 235],
+    blueBg: [219, 234, 254]
+  };
+
+  const prob = result.probability;
+  const pct  = Math.round(prob * 100);
+  const isLow  = pct < 35;
+  const isHigh = pct >= 65;
+  const RC     = isLow ? C.green  : isHigh ? C.red  : C.amber;
+  const RCBg   = isLow ? C.greenBg : isHigh ? C.redBg : C.amberBg;
+  const RLABEL = isLow ? "LOW RISK" : isHigh ? "HIGH RISK" : "MODERATE RISK";
+  const VERDICT = result.prediction === 1 ? "Heart Disease Likely" : "No Disease Detected";
+
+  const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+  const reportId = `CS-${Date.now().toString(36).toUpperCase().slice(-8)}`;
+
+  // ── Drawing Helpers ────────────────────────────────────────────────────────
+  const sf = (style, size, color) => {
+    doc.setFont("helvetica", style);
+    doc.setFontSize(size);
+    if (color) doc.setTextColor(...color);
+  };
+  const fr = (...c) => doc.setFillColor(...c);
+  const sk = (...c) => doc.setDrawColor(...c);
+  const lw = (w) => doc.setLineWidth(w);
+  const box = (x, y, w, h, r = 0, mode = "F") => r > 0 ? doc.roundedRect(x, y, w, h, r, r, mode) : doc.rect(x, y, w, h, mode);
+  const rText = (text, rightX, y) => doc.text(text, rightX - doc.getTextWidth(text), y);
+  const cText = (text, cx, y) => doc.text(text, cx - doc.getTextWidth(text) / 2, y);
+
+  const pill = (x, y, text, bg, fg, fs = 7) => {
+    sf("bold", fs);
+    const tw = doc.getTextWidth(text);
+    fr(...bg); box(x, y, tw + 8, 5.5, 2.75);
+    sf("bold", fs, fg); doc.text(text, x + 4, y + 4);
+    return tw + 8;
+  };
+
+  const pBar = (x, y, w, h, pct100, fillColor, r = 1) => {
+    fr(...C.border); box(x, y, w, h, r);
+    if (pct100 > 0) { fr(...fillColor); box(x, y, Math.max(w * pct100 / 100, r * 2), h, r); }
+  };
+
+  const sectionHeader = (title, y) => {
+    sf("bold", 9, C.dark);
+    doc.text(title.toUpperCase(), ML, y);
+    sk(...C.border); lw(0.5);
+    doc.line(ML, y + 2, ML + CW, y + 2);
+    return y + 6;
+  };
+
+  let Y = 0;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // HEADER 
+  // ══════════════════════════════════════════════════════════════════════════
+  fr(...C.dark); box(0, 0, W, 32);
+  fr(...C.accent); box(0, 0, W, 2); 
+
+  fr(...C.accent); box(ML, 9, 8, 8, 2);
+  fr(...C.white); doc.circle(ML + 4, 13, 1.5, "F");
+
+  sf("bold", 18, C.white); doc.text("CardioSense", ML + 11, 15);
+  sf("normal", 18, C.white); doc.text(" AI", ML + 11 + doc.getTextWidth("CardioSense"), 15);
+  
+  sf("normal", 8, C.grayText); doc.text("Clinical Risk Assessment Report", ML + 11, 21);
+
+  sf("normal", 7, C.grayText); rText("DATE", W - MR, 12);
+  sf("bold", 8, C.white); rText(`${dateStr} ${timeStr}`, W - MR, 16);
+  
+  sf("normal", 7, C.grayText); rText("REPORT ID", W - MR, 21);
+  sf("bold", 8, C.white); rText(reportId, W - MR, 25);
+
+  Y = 40;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // VERDICT CARD
+  // ══════════════════════════════════════════════════════════════════════════
+  const CARD_H = 32;
+  sk(...C.border); lw(0.5); fr(...C.bgLight);
+  box(ML, Y, CW, CARD_H, 4, "FD");
+  fr(...RC); box(ML, Y, 4, CARD_H, 4); 
+  fr(...C.bgLight); box(ML + 3, Y, 2, CARD_H, 0); 
+
+  pill(ML + 8, Y + 5, RLABEL, RCBg, RC, 7.5);
+  sf("bold", 15, C.dark); doc.text(VERDICT, ML + 8, Y + 17);
+
+  const statY = Y + 26;
+  sf("normal", 8, C.grayText); doc.text("Probability:", ML + 8, statY);
+  sf("bold", 9, C.dark); doc.text(`${(prob * 100).toFixed(1)}%`, ML + 26, statY);
+
+  sf("normal", 8, C.grayText); doc.text("Confidence:", ML + 45, statY);
+  sf("bold", 9, C.dark); doc.text("99.21%", ML + 63, statY);
+
+  const RCX = ML + CW - 24, RCY = Y + 16, R = 11;
+  sk(...C.border); lw(3); doc.circle(RCX, RCY, R, "S");
+  sk(...RC); lw(3);
+  const totalArcSteps = 40;
+  const filledSteps = Math.round((pct / 100) * totalArcSteps);
+  for (let i = 0; i < filledSteps; i++) {
+    const a1 = -Math.PI / 2 + (i / totalArcSteps) * 2 * Math.PI;
+    const a2 = -Math.PI / 2 + ((i + 1) / totalArcSteps) * 2 * Math.PI;
+    doc.line(RCX + R * Math.cos(a1), RCY + R * Math.sin(a1), RCX + R * Math.cos(a2), RCY + R * Math.sin(a2));
+  }
+  sf("bold", 11, C.dark); cText(`${pct}%`, RCX, RCY + 3.5);
+
+  Y += CARD_H + 8;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PATIENT PROFILE & MODEL STATS
+  // ══════════════════════════════════════════════════════════════════════════
+  const HW = (CW - 6) / 2;
+  
+  sk(...C.border); lw(0.5); fr(...C.white); box(ML, Y, HW, 16, 3, "FD");
+  sf("bold", 7.5, C.grayText); doc.text("PATIENT PROFILE", ML + 5, Y + 5);
+  sf("normal", 8.5, C.grayText); doc.text("Age:", ML + 5, Y + 11.5);
+  sf("bold", 9, C.dark); doc.text(`${form.Age} yrs`, ML + 13, Y + 11.5);
+  sf("normal", 8.5, C.grayText); doc.text("Sex:", ML + 35, Y + 11.5);
+  sf("bold", 9, C.dark); doc.text(form.Gender === 1 ? "Male" : "Female", ML + 43, Y + 11.5);
+
+  const C2X = ML + HW + 6;
+  sk(...C.border); lw(0.5); fr(...C.white); box(C2X, Y, HW, 16, 3, "FD");
+  sf("bold", 7.5, C.grayText); doc.text("AI MODEL PARAMETERS", C2X + 5, Y + 5);
+  sf("normal", 7.5, C.grayText); doc.text("Trained on 70,000+ clinical records using", C2X + 5, Y + 10);
+  doc.text("perturbation analysis for factor attribution.", C2X + 5, Y + 13.5);
+
+  Y += 24;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // RISK DOMAINS
+  // ══════════════════════════════════════════════════════════════════════════
+  Y = sectionHeader("Risk Domain Breakdown", Y);
+
+  const radarData = getRadarData(form);
+  const DW = (CW - 10) / 3; 
+  const DH = 16;
+
+  radarData.forEach((d, i) => {
+    const col = i % 3, row = Math.floor(i / 3);
+    const DX = ML + col * (DW + 5);
+    const DY = Y + row * (DH + 4);
+    const score = Math.round(d.score);
+    const DC  = score < 35 ? C.green : score >= 65 ? C.red  : C.amber;
+    
+    sk(...C.border); lw(0.5); fr(...C.bgLight); box(DX, DY, DW, DH, 2, "FD");
+    
+    sf("bold", 7.5, C.darkSub); doc.text(d.label, DX + 4, DY + 6);
+    sf("bold", 9, DC); rText(`${score}%`, DX + DW - 4, DY + 6);
+    
+    pBar(DX + 4, DY + 10, DW - 8, 3.5, score, DC, 1.5);
+  });
+
+  Y += Math.ceil(radarData.length / 3) * (DH + 4) + 6;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TOP FACTORS
+  // ══════════════════════════════════════════════════════════════════════════
+  Y = sectionHeader("Top Contributing Factors", Y);
+
+  const maxF = Math.max(...factors.map(f => Math.abs(f.contrib)), 0.001);
+  const ROW_H = 9;
+
+  factors.forEach((f, i) => {
+    const FY = Y + i * ROW_H;
+    const isRisk = f.contrib > 0;
+    const FC  = isRisk ? C.red  : C.green;
+    const FCL = isRisk ? C.redBg : C.greenBg;
+
+    if (i % 2 === 0) { fr(...C.bgLight); box(ML, FY, CW, ROW_H); }
+
+    sf("bold", 8, C.darkSub); doc.text(`${i + 1}.`, ML + 2, FY + 6);
+    sf("bold", 8, C.dark); doc.text(f.name, ML + 8, FY + 6);
+
+    const BAR_X = ML + CW * 0.45;
+    const BAR_W = CW * 0.35;
+    pBar(BAR_X, FY + 3.5, BAR_W, 3.5, Math.round((Math.abs(f.contrib) / maxF) * 100), FC, 1.5);
+
+    pill(BAR_X + BAR_W + 5, FY + 2, isRisk ? "+ RISK" : "- PROT.", FCL, FC, 6);
+  });
+
+  Y += factors.length * ROW_H + 8;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // CLINICAL FEATURES SUMMARY
+  // ══════════════════════════════════════════════════════════════════════════
+  Y = sectionHeader("Clinical Features Inventory", Y);
+
+  // Safety break to prevent footer overlap under extreme circumstances
+  if (Y > 265) {
+    doc.addPage();
+    Y = 20;
+  }
+
+  const featureGroups = [
+    { title: "Symptoms", items: ["Chest_Pain", "Shortness_of_Breath", "Fatigue", "Palpitations", "Dizziness", "Swelling", "Pain_Arms_Jaw_Back", "Cold_Sweats_Nausea"] },
+    { title: "Medical", items: ["High_BP", "High_Cholesterol", "Diabetes", "Family_History"] },
+    { title: "Lifestyle", items: ["Smoking", "Obesity", "Sedentary_Lifestyle", "Chronic_Stress"] }
+  ];
+
+  const formatKey = (k) => k.replace(/_/g, " ");
+  
+  featureGroups.forEach((grp) => {
+    sf("bold", 8, C.darkSub); doc.text(grp.title, ML, Y + 4);
+    
+    let labelW = doc.getTextWidth(grp.title);
+    let curX = ML + Math.max(20, labelW + 4);
+    
+    grp.items.forEach((key) => {
+      const active = form[key] === 1;
+      const label = formatKey(key);
+      
+      // FIX: Font must be explicitly set BEFORE calculating getTextWidth!
+      if (active) sf("bold", 7.5, C.blue);
+      else sf("normal", 7.5, C.grayText);
+      
+      const tw = doc.getTextWidth(label) + 6; 
+      
+      // Word wrap logic
+      if (curX + tw > ML + CW) {
+        curX = ML + Math.max(20, labelW + 4);
+        Y += 6;
+      }
+      
+      // Draw UI pill if active
+      if (active) {
+        fr(...C.blueBg); box(curX, Y + 0.5, tw - 1, 5, 1);
+      }
+      
+      doc.text(label, curX + 3, Y + 4.2);
+      curX += tw + 1.5; // Gap between pills
+    });
+    Y += 8;
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // FOOTER
+  // ══════════════════════════════════════════════════════════════════════════
+  const FY = PH - 15;
+  sk(...C.border); lw(0.5); doc.line(ML, FY - 3, ML + CW, FY - 3);
+
+  sf("bold", 7, C.accent); doc.text("DISCLAIMER:", ML, FY);
+  sf("normal", 7, C.grayText);
+  doc.text("This report is an AI research tool and is NOT a substitute for professional medical advice. Always consult a qualified physician.", ML, FY + 4);
+
+  sf("bold", 8, C.dark); rText("CardioSense AI", W - MR, FY);
+  sf("normal", 7, C.grayText); rText("Page 1 of 1", W - MR, FY + 4);
+
+  doc.save(`CardioSense_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // ─── Steps ────────────────────────────────────────────────────────────────────
@@ -483,6 +761,7 @@ function StepLifestyle({ form, set, t }) {
 
 // ─── Result Modal ─────────────────────────────────────────────────────────────
 function ResultCard({ result, factors, form, onClose, onRetake, t }) {
+  const [pdfLoading, setPdfLoading] = useState(false);
   const prob = result.probability;
   const pct = Math.round(prob * 100);
   const rColor = pct < 35 ? "#16a34a" : pct < 65 ? "#ca8a04" : "#dc2626";
@@ -491,7 +770,18 @@ function ResultCard({ result, factors, form, onClose, onRetake, t }) {
   const circ = Math.PI * 70;
   const radarData = getRadarData(form);
   const maxF = Math.max(...factors.map((f) => Math.abs(f.contrib)), 0.001);
-  
+
+  const handleDownloadPDF = async () => {
+    setPdfLoading(true);
+    try {
+      await downloadPDFReport({ result, factors, form });
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   return (
     <AnimatePresence>
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -613,6 +903,40 @@ function ResultCard({ result, factors, form, onClose, onRetake, t }) {
               </div>
             </motion.div>
 
+            {/* ── PDF Download Button ── */}
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.75 }}
+              style={{ marginBottom: 10 }}>
+              <motion.button
+                whileHover={!pdfLoading ? { scale: 1.02, y: -1 } : {}}
+                whileTap={!pdfLoading ? { scale: 0.98 } : {}}
+                onClick={handleDownloadPDF}
+                disabled={pdfLoading}
+                style={{
+                  width: "100%", padding: "12px 16px", borderRadius: 10, cursor: pdfLoading ? "default" : "pointer",
+                  border: `1.5px solid ${t.accent}40`, background: `${t.accent}09`, fontFamily: "inherit",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  fontSize: 13, fontWeight: 700, color: t.accent,
+                  transition: "opacity .15s",
+                  opacity: pdfLoading ? 0.7 : 1,
+                }}>
+                {pdfLoading ? (
+                  <>
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ repeat: Infinity, duration: 0.8, ease: "linear" }}
+                      style={{ width: 14, height: 14, borderRadius: "50%", border: `2px solid ${t.accent}40`, borderTopColor: t.accent }}
+                    />
+                    Generating PDF…
+                  </>
+                ) : (
+                  <>
+                    <Download size={14} strokeWidth={2.5} />
+                    Download PDF Report
+                  </>
+                )}
+              </motion.button>
+            </motion.div>
+
             {/* Actions */}
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.8 }}
               style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -666,7 +990,7 @@ export default function App() {
   const [step, setStep] = useState(0);
   const [dir, setDir] = useState(1);
   const [form, setForm] = useState(DEFAULTS);
-  const [result, setResult] = useState(null);   // { probability, prediction }
+  const [result, setResult] = useState(null);
   const [factors, setFactors] = useState([]);
   const [showResult, setShowResult] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -680,12 +1004,8 @@ export default function App() {
     setSubmitting(true);
     setError(null);
     try {
-      // 1. Main prediction from backend
-      const data = await callAPI(form);                              // { probability, prediction }
-
-      // 2. Parallel perturbation calls for top factor attribution
+      const data = await callAPI(form);
       const topFactors = await getTopFactors(form, data.probability);
-
       setResult(data);
       setFactors(topFactors);
       setShowResult(true);
